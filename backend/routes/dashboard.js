@@ -1,8 +1,11 @@
 import { Router } from 'express';
 import dayjs from 'dayjs';
-import db from '../database/db.js';
+import dbPromise from '../database/db.js';
 import { authMiddleware } from '../middleware/auth.middleware.js';
 import workerService from '../services/worker.service.js';
+
+let db;
+dbPromise.then(d => db = d);
 
 const router = Router();
 

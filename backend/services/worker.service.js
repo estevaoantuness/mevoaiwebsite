@@ -1,8 +1,11 @@
 import cron from 'node-cron';
 import dayjs from 'dayjs';
-import db from '../database/db.js';
+import dbPromise from '../database/db.js';
 import icalService from './ical.service.js';
 import whatsappService from './whatsapp.service.js';
+
+let db;
+dbPromise.then(d => db = d);
 
 class WorkerService {
   constructor() {

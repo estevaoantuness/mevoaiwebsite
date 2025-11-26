@@ -1,6 +1,9 @@
 import { Router } from 'express';
-import db from '../database/db.js';
+import dbPromise from '../database/db.js';
 import { authMiddleware } from '../middleware/auth.middleware.js';
+
+let db;
+dbPromise.then(d => db = d);
 
 const router = Router();
 

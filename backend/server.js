@@ -3,7 +3,7 @@ import express from 'express';
 import cors from 'cors';
 
 // Importa o banco (inicializa e cria tabelas)
-import './database/db.js';
+import dbPromise from './database/db.js';
 
 // Importa rotas
 import authRoutes from './routes/auth.js';
@@ -68,28 +68,36 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Erro interno do servidor' });
 });
 
-// Inicializa servidor
-app.listen(PORT, async () => {
-  console.log(`
+// Inicializa servidor após banco estar pronto
+async function startServer() {
+  // Aguarda banco inicializar
+  await dbPromise;
+  console.log('Banco de dados inicializado');
+
+  app.listen(PORT, async () => {
+    console.log(`
   ╔═══════════════════════════════════════╗
   ║         MEVO Backend v1.0.0           ║
   ╠═══════════════════════════════════════╣
   ║  Servidor rodando na porta ${PORT}       ║
   ║  http://localhost:${PORT}                ║
   ╚═══════════════════════════════════════╝
-  `);
+    `);
 
-  // Inicializa WhatsApp
-  console.log('Inicializando WhatsApp...');
-  try {
-    await whatsappService.initialize();
-  } catch (error) {
-    console.error('Erro ao inicializar WhatsApp:', error.message);
-    console.log('O servidor continuará rodando sem WhatsApp.');
-  }
+    // Inicializa WhatsApp
+    console.log('Inicializando WhatsApp...');
+    try {
+      await whatsappService.initialize();
+    } catch (error) {
+      console.error('Erro ao inicializar WhatsApp:', error.message);
+      console.log('O servidor continuará rodando sem WhatsApp.');
+    }
 
-  // Inicia worker de automação
-  workerService.start();
-});
+    // Inicia worker de automação
+    workerService.start();
+  });
+}
+
+startServer();
 
 export default app;

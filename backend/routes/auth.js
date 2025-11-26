@@ -1,8 +1,11 @@
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import db from '../database/db.js';
+import dbPromise from '../database/db.js';
 import { JWT_SECRET } from '../middleware/auth.middleware.js';
+
+let db;
+dbPromise.then(d => db = d);
 
 const router = Router();
 
