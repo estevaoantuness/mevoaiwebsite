@@ -1,32 +1,77 @@
 import React, { useState, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
-import { 
-  LayoutGrid, 
-  Home, 
-  MessageCircle, 
-  LogOut, 
-  Plus, 
-  Trash2, 
-  Smartphone, 
+import {
+  LayoutGrid,
+  Home,
+  MessageCircle,
+  LogOut,
+  Plus,
+  Trash2,
+  Smartphone,
   Calendar,
   Shield,
   ArrowRight,
   Check,
   Menu,
   X,
-  ShieldCheck
+  ShieldCheck,
+  RefreshCw
 } from 'lucide-react';
+
+// --- API Configuration ---
+const API_URL = 'http://localhost:3001/api';
+
+// --- API Helper ---
+const api = {
+  getToken: () => localStorage.getItem('mevo_token'),
+
+  async fetch(endpoint: string, options: RequestInit = {}) {
+    const token = this.getToken();
+    const response = await fetch(`${API_URL}${endpoint}`, {
+      ...options,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...options.headers,
+      },
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Erro desconhecido' }));
+      throw new Error(error.error || 'Erro na requisição');
+    }
+
+    return response.json();
+  },
+
+  // Auth
+  login: (email: string, password: string) =>
+    api.fetch('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
+
+  // Properties
+  getProperties: () => api.fetch('/properties'),
+  createProperty: (data: any) => api.fetch('/properties', { method: 'POST', body: JSON.stringify(data) }),
+  deleteProperty: (id: number) => api.fetch(`/properties/${id}`, { method: 'DELETE' }),
+
+  // Dashboard
+  getStats: () => api.fetch('/dashboard/stats'),
+  getLogs: () => api.fetch('/logs'),
+  runWorker: () => api.fetch('/dashboard/run-worker', { method: 'POST' }),
+
+  // WhatsApp
+  getWhatsAppStatus: () => api.fetch('/whatsapp/status'),
+  getWhatsAppQR: () => api.fetch('/whatsapp/qr'),
+
+  // Settings
+  getSettings: () => api.fetch('/settings'),
+  updateSetting: (key: string, value: string) =>
+    api.fetch(`/settings/${key}`, { method: 'PUT', body: JSON.stringify({ value }) }),
+};
 
 // --- Theme & Brand Configuration ---
 // Brand Colors extracted from logo: Blue to Cyan gradient
 const BRAND_GRADIENT = "bg-gradient-to-r from-[#2563EB] to-[#22D3EE]";
 const BRAND_TEXT_GRADIENT = "bg-clip-text text-transparent bg-gradient-to-r from-[#2563EB] to-[#22D3EE]";
-
-// --- Mock Data ---
-const INITIAL_PROPERTIES = [
-  { id: 1, name: "Loft Centro 402", airbnb_ical: "https://airbnb.com/ical/...", cleaner_phone: "+5541999990000", status: "active" },
-  { id: 2, name: "Casa de Praia", airbnb_ical: "https://airbnb.com/ical/...", cleaner_phone: "+5541988880000", status: "active" }
-];
 
 // --- Components ---
 
@@ -191,20 +236,19 @@ const LoginPage = ({ onLoginSuccess, onBack }: LoginPageProps) => {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError("");
-    
-    // Simulate API call
-    setTimeout(() => {
-      if (email === "admin@mevo.app" && password === "admin") {
-        onLoginSuccess();
-      } else {
-        setError("Credenciais inválidas. Tente admin@mevo.app / admin");
-        setLoading(false);
-      }
-    }, 800);
+
+    try {
+      const response = await api.login(email, password);
+      localStorage.setItem('mevo_token', response.token);
+      onLoginSuccess();
+    } catch (err: any) {
+      setError(err.message || "Credenciais inválidas. Tente admin@mevo.app / admin");
+      setLoading(false);
+    }
   };
 
   return (
@@ -263,27 +307,91 @@ interface DashboardProps {
 
 const Dashboard = ({ onLogout }: DashboardProps) => {
   const [activeTab, setActiveTab] = useState('overview');
-  const [properties, setProperties] = useState(INITIAL_PROPERTIES);
+  const [properties, setProperties] = useState<any[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  
-  // New Property Form State
-  const [newProp, setNewProp] = useState({ name: '', airbnb_ical: '', cleaner_phone: '' });
+  const [stats, setStats] = useState({ totalProperties: 0, messagesToday: 0, messagesThisMonth: 0 });
+  const [whatsappStatus, setWhatsappStatus] = useState({ status: 'disconnected', hasQR: false });
+  const [qrCode, setQrCode] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  const handleAddProperty = (e: React.FormEvent) => {
-    e.preventDefault();
-    const property = {
-      id: Date.now(),
-      ...newProp,
-      status: 'active'
-    };
-    setProperties([property, ...properties]);
-    setNewProp({ name: '', airbnb_ical: '', cleaner_phone: '' });
-    setIsModalOpen(false);
+  // New Property Form State
+  const [newProp, setNewProp] = useState({ name: '', ical_airbnb: '', ical_booking: '', employee_name: '', employee_phone: '' });
+
+  // Fetch data on mount
+  useEffect(() => {
+    fetchData();
+  }, []);
+
+  const fetchData = async () => {
+    try {
+      const [propsData, statsData] = await Promise.all([
+        api.getProperties(),
+        api.getStats()
+      ]);
+      setProperties(propsData);
+      setStats(statsData);
+    } catch (err) {
+      console.error('Erro ao carregar dados:', err);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleDelete = (id: number) => {
+  // Fetch WhatsApp status when tab changes
+  useEffect(() => {
+    if (activeTab === 'whatsapp') {
+      fetchWhatsAppStatus();
+      const interval = setInterval(fetchWhatsAppStatus, 3000);
+      return () => clearInterval(interval);
+    }
+  }, [activeTab]);
+
+  const fetchWhatsAppStatus = async () => {
+    try {
+      const status = await api.getWhatsAppStatus();
+      setWhatsappStatus(status);
+
+      if (status.hasQR) {
+        const qrData = await api.getWhatsAppQR();
+        setQrCode(qrData.qr);
+      } else {
+        setQrCode(null);
+      }
+    } catch (err) {
+      console.error('Erro ao buscar status WhatsApp:', err);
+    }
+  };
+
+  const handleAddProperty = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const property = await api.createProperty(newProp);
+      setProperties([property, ...properties]);
+      setNewProp({ name: '', ical_airbnb: '', ical_booking: '', employee_name: '', employee_phone: '' });
+      setIsModalOpen(false);
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
+  const handleDelete = async (id: number) => {
     if (confirm('Tem certeza que deseja excluir este imóvel?')) {
-      setProperties(properties.filter(p => p.id !== id));
+      try {
+        await api.deleteProperty(id);
+        setProperties(properties.filter(p => p.id !== id));
+      } catch (err: any) {
+        alert(err.message);
+      }
+    }
+  };
+
+  const handleRunWorker = async () => {
+    try {
+      await api.runWorker();
+      alert('Worker executado! Verifique os logs.');
+      fetchData();
+    } catch (err: any) {
+      alert(err.message);
     }
   };
 
@@ -358,9 +466,9 @@ const Dashboard = ({ onLogout }: DashboardProps) => {
             <div className="max-w-5xl animate-in fade-in slide-in-from-bottom-4 duration-500">
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
                 {[
-                  { label: "Imóveis Ativos", val: properties.length },
-                  { label: "Limpezas Hoje", val: "0" },
-                  { label: "Mensagens Enviadas", val: "0" }
+                  { label: "Imóveis Ativos", val: stats.totalProperties },
+                  { label: "Mensagens Hoje", val: stats.messagesToday },
+                  { label: "Mensagens no Mês", val: stats.messagesThisMonth }
                 ].map((stat, i) => (
                   <div key={i} className="bg-[#0B0C15] border border-white/5 p-6 rounded-xl hover:border-white/10 transition-colors">
                     <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-2">{stat.label}</p>
@@ -369,12 +477,23 @@ const Dashboard = ({ onLogout }: DashboardProps) => {
                 ))}
               </div>
 
-              <div className="bg-[#0B0C15]/50 border-2 border-dashed border-white/5 rounded-xl p-12 text-center">
-                <div className="w-12 h-12 bg-white/5 rounded-full flex items-center justify-center mx-auto mb-4 text-slate-500">
-                   <ShieldCheck size={24} />
+              <div className="bg-[#0B0C15]/50 border border-white/5 rounded-xl p-8">
+                <div className="flex items-center justify-between mb-6">
+                  <div>
+                    <h3 className="text-slate-300 font-medium mb-1">Executar Worker Manualmente</h3>
+                    <p className="text-slate-500 text-sm">Processa checkouts e envia mensagens agora (sem esperar 08:00)</p>
+                  </div>
+                  <Button onClick={handleRunWorker} variant="secondary">
+                    <RefreshCw size={16} className="mr-2" /> Executar Agora
+                  </Button>
                 </div>
-                <h3 className="text-slate-300 font-medium mb-1">Tudo tranquilo por aqui</h3>
-                <p className="text-slate-500 text-sm">Nenhuma atividade recente de limpeza registrada para hoje.</p>
+
+                <div className="flex items-center gap-3 p-4 bg-white/[0.02] rounded-lg">
+                  <div className={`w-2 h-2 rounded-full ${whatsappStatus.status === 'connected' ? 'bg-emerald-500' : 'bg-red-500'}`} />
+                  <span className="text-sm text-slate-400">
+                    WhatsApp: {whatsappStatus.status === 'connected' ? 'Conectado' : 'Desconectado'}
+                  </span>
+                </div>
               </div>
             </div>
           )}
@@ -397,15 +516,16 @@ const Dashboard = ({ onLogout }: DashboardProps) => {
                   <thead>
                     <tr className="border-b border-white/5 bg-white/[0.02]">
                       <th className="py-3 px-6 text-xs font-medium text-slate-500 uppercase tracking-wider">Imóvel</th>
-                      <th className="py-3 px-6 text-xs font-medium text-slate-500 uppercase tracking-wider">Status</th>
-                      <th className="py-3 px-6 text-xs font-medium text-slate-500 uppercase tracking-wider">Telefone Faxina</th>
+                      <th className="py-3 px-6 text-xs font-medium text-slate-500 uppercase tracking-wider">Funcionária</th>
+                      <th className="py-3 px-6 text-xs font-medium text-slate-500 uppercase tracking-wider">Telefone</th>
+                      <th className="py-3 px-6 text-xs font-medium text-slate-500 uppercase tracking-wider">Calendários</th>
                       <th className="py-3 px-6 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Ações</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-white/5">
                     {properties.length === 0 ? (
                       <tr>
-                        <td colSpan={4} className="py-12 text-center text-sm text-slate-500">
+                        <td colSpan={5} className="py-12 text-center text-sm text-slate-500">
                           Nenhum imóvel cadastrado. Adicione o primeiro acima.
                         </td>
                       </tr>
@@ -420,17 +540,28 @@ const Dashboard = ({ onLogout }: DashboardProps) => {
                               <span className="text-sm font-medium text-slate-200">{p.name}</span>
                             </div>
                           </td>
-                          <td className="py-4 px-6">
-                            <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                              <span className="w-1 h-1 rounded-full bg-emerald-400 mr-1.5"></span>
-                              Conectado
-                            </span>
+                          <td className="py-4 px-6 text-sm text-slate-300">
+                            {p.employee_name}
                           </td>
                           <td className="py-4 px-6 text-sm text-slate-400 font-mono text-xs">
-                            {p.cleaner_phone}
+                            {p.employee_phone}
+                          </td>
+                          <td className="py-4 px-6">
+                            <div className="flex gap-2">
+                              {p.ical_airbnb && (
+                                <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-pink-500/10 text-pink-400 border border-pink-500/20">
+                                  Airbnb
+                                </span>
+                              )}
+                              {p.ical_booking && (
+                                <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                                  Booking
+                                </span>
+                              )}
+                            </div>
                           </td>
                           <td className="py-4 px-6 text-right">
-                            <button 
+                            <button
                               onClick={() => handleDelete(p.id)}
                               className="p-2 text-slate-600 hover:text-red-400 hover:bg-red-500/10 rounded transition-all opacity-0 group-hover:opacity-100"
                               title="Excluir"
@@ -452,27 +583,45 @@ const Dashboard = ({ onLogout }: DashboardProps) => {
             <div className="max-w-2xl mx-auto mt-12 animate-in fade-in slide-in-from-bottom-4 duration-500">
               <div className="bg-[#0B0C15] border border-white/5 rounded-xl p-10 text-center relative overflow-hidden">
                 <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-blue-500/50 to-transparent opacity-50"></div>
-                
+
                 <div className="w-16 h-16 rounded-2xl bg-white/5 mx-auto flex items-center justify-center mb-6 text-slate-400">
                   <Smartphone size={32} />
                 </div>
-                
+
                 <h3 className="text-xl font-medium text-white mb-2">Conexão WhatsApp</h3>
                 <p className="text-sm text-slate-400 mb-8 max-w-sm mx-auto">
-                  Escaneie o QR Code para permitir que a Mevo envie mensagens automáticas para suas equipes de limpeza.
+                  Escaneie o QR Code para permitir que o Mevo envie mensagens automáticas para suas funcionárias.
                 </p>
 
-                <div className="inline-flex items-center px-3 py-1 rounded-full bg-red-500/10 border border-red-500/20 text-red-400 text-xs font-medium mb-8">
-                  ● Offline
+                <div className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium mb-8 ${
+                  whatsappStatus.status === 'connected'
+                    ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400'
+                    : whatsappStatus.status === 'connecting'
+                    ? 'bg-yellow-500/10 border border-yellow-500/20 text-yellow-400'
+                    : 'bg-red-500/10 border border-red-500/20 text-red-400'
+                }`}>
+                  ● {whatsappStatus.status === 'connected' ? 'Conectado' : whatsappStatus.status === 'connecting' ? 'Conectando...' : 'Desconectado'}
                 </div>
 
-                <div className="w-64 h-64 mx-auto border-2 border-dashed border-white/10 rounded-xl flex flex-col items-center justify-center bg-black/20 mb-6">
-                  <div className="w-8 h-8 border-2 border-slate-600 border-t-slate-400 rounded-full animate-spin mb-3"></div>
-                  <span className="text-xs text-slate-500 font-mono">Waiting for QR Code...</span>
-                </div>
+                {whatsappStatus.status === 'connected' ? (
+                  <div className="w-64 h-64 mx-auto border border-emerald-500/20 rounded-xl flex flex-col items-center justify-center bg-emerald-500/5 mb-6">
+                    <ShieldCheck size={48} className="text-emerald-400 mb-4" />
+                    <span className="text-sm text-emerald-400 font-medium">WhatsApp Conectado!</span>
+                    <span className="text-xs text-slate-500 mt-2">Pronto para enviar mensagens</span>
+                  </div>
+                ) : qrCode ? (
+                  <div className="w-64 h-64 mx-auto rounded-xl overflow-hidden mb-6 bg-white p-2">
+                    <img src={qrCode} alt="QR Code WhatsApp" className="w-full h-full" />
+                  </div>
+                ) : (
+                  <div className="w-64 h-64 mx-auto border-2 border-dashed border-white/10 rounded-xl flex flex-col items-center justify-center bg-black/20 mb-6">
+                    <div className="w-8 h-8 border-2 border-slate-600 border-t-slate-400 rounded-full animate-spin mb-3"></div>
+                    <span className="text-xs text-slate-500 font-mono">Aguardando QR Code...</span>
+                  </div>
+                )}
 
                 <p className="text-xs text-slate-600">
-                  Integração via @wppconnect/server
+                  Integração via whatsapp-web.js
                 </p>
               </div>
             </div>
@@ -481,38 +630,50 @@ const Dashboard = ({ onLogout }: DashboardProps) => {
       </main>
 
       {/* Add Property Modal */}
-      <Modal 
-        isOpen={isModalOpen} 
+      <Modal
+        isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
         title="Novo Imóvel"
       >
         <form onSubmit={handleAddProperty} className="space-y-4">
-          <Input 
-            label="Nome do Imóvel" 
-            placeholder="Ex: Loft Centro 402" 
+          <Input
+            label="Nome do Imóvel"
+            placeholder="Ex: Loft Centro 402"
             required
             value={newProp.name}
             onChange={e => setNewProp({...newProp, name: e.target.value})}
           />
-          <div className="grid grid-cols-1 gap-4">
-             <Input 
-              label="Airbnb iCal URL" 
-              placeholder="https://airbnb.com/calendar/ical/..." 
+          <div className="grid grid-cols-2 gap-4">
+            <Input
+              label="Nome da Funcionária"
+              placeholder="Ex: Maria"
               required
-              value={newProp.airbnb_ical}
-              onChange={e => setNewProp({...newProp, airbnb_ical: e.target.value})}
-             />
+              value={newProp.employee_name}
+              onChange={e => setNewProp({...newProp, employee_name: e.target.value})}
+            />
+            <Input
+              label="Telefone (WhatsApp)"
+              placeholder="41999990000"
+              required
+              value={newProp.employee_phone}
+              onChange={e => setNewProp({...newProp, employee_phone: e.target.value})}
+            />
           </div>
-          <Input 
-            label="Telefone Faxina (WhatsApp)" 
-            placeholder="+5541999990000" 
-            required
-            value={newProp.cleaner_phone}
-            onChange={e => setNewProp({...newProp, cleaner_phone: e.target.value})}
+          <Input
+            label="Airbnb iCal URL"
+            placeholder="https://airbnb.com/calendar/ical/..."
+            value={newProp.ical_airbnb}
+            onChange={e => setNewProp({...newProp, ical_airbnb: e.target.value})}
+          />
+          <Input
+            label="Booking iCal URL (opcional)"
+            placeholder="https://admin.booking.com/..."
+            value={newProp.ical_booking}
+            onChange={e => setNewProp({...newProp, ical_booking: e.target.value})}
           />
           <div className="pt-4 flex justify-end gap-3">
-             <Button type="button" variant="secondary" onClick={() => setIsModalOpen(false)}>Cancelar</Button>
-             <Button type="submit">Salvar Imóvel</Button>
+            <Button type="button" variant="secondary" onClick={() => setIsModalOpen(false)}>Cancelar</Button>
+            <Button type="submit">Salvar Imóvel</Button>
           </div>
         </form>
       </Modal>
@@ -526,18 +687,17 @@ const App = () => {
   const [page, setPage] = useState('landing'); // 'landing', 'login', 'dashboard'
 
   useEffect(() => {
-    // Check for "session"
-    const session = localStorage.getItem('mevo_session');
-    if (session) setPage('dashboard');
+    // Check for token
+    const token = localStorage.getItem('mevo_token');
+    if (token) setPage('dashboard');
   }, []);
 
   const handleLoginSuccess = () => {
-    localStorage.setItem('mevo_session', 'true');
     setPage('dashboard');
   };
 
   const handleLogout = () => {
-    localStorage.removeItem('mevo_session');
+    localStorage.removeItem('mevo_token');
     setPage('landing');
   };
 

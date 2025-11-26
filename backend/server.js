@@ -1,0 +1,95 @@
+import 'dotenv/config';
+import express from 'express';
+import cors from 'cors';
+
+// Importa o banco (inicializa e cria tabelas)
+import './database/db.js';
+
+// Importa rotas
+import authRoutes from './routes/auth.js';
+import propertiesRoutes from './routes/properties.js';
+import settingsRoutes from './routes/settings.js';
+import whatsappRoutes from './routes/whatsapp.js';
+import dashboardRoutes from './routes/dashboard.js';
+
+// Importa serviços
+import whatsappService from './services/whatsapp.service.js';
+import workerService from './services/worker.service.js';
+
+const app = express();
+const PORT = process.env.PORT || 3001;
+
+// Middlewares
+app.use(cors());
+app.use(express.json());
+
+// Log de requisições
+app.use((req, res, next) => {
+  console.log(`${req.method} ${req.path}`);
+  next();
+});
+
+// Rotas
+app.use('/api/auth', authRoutes);
+app.use('/api/properties', propertiesRoutes);
+app.use('/api/settings', settingsRoutes);
+app.use('/api/whatsapp', whatsappRoutes);
+app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/logs', dashboardRoutes);
+
+// Health check
+app.get('/api/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    whatsapp: whatsappService.getStatus()
+  });
+});
+
+// Rota raiz
+app.get('/', (req, res) => {
+  res.json({
+    name: 'Mevo API',
+    version: '1.0.0',
+    endpoints: [
+      'POST /api/auth/login',
+      'GET /api/properties',
+      'GET /api/settings',
+      'GET /api/whatsapp/status',
+      'GET /api/dashboard/stats',
+      'GET /api/logs'
+    ]
+  });
+});
+
+// Error handler
+app.use((err, req, res, next) => {
+  console.error(err.stack);
+  res.status(500).json({ error: 'Erro interno do servidor' });
+});
+
+// Inicializa servidor
+app.listen(PORT, async () => {
+  console.log(`
+  ╔═══════════════════════════════════════╗
+  ║         MEVO Backend v1.0.0           ║
+  ╠═══════════════════════════════════════╣
+  ║  Servidor rodando na porta ${PORT}       ║
+  ║  http://localhost:${PORT}                ║
+  ╚═══════════════════════════════════════╝
+  `);
+
+  // Inicializa WhatsApp
+  console.log('Inicializando WhatsApp...');
+  try {
+    await whatsappService.initialize();
+  } catch (error) {
+    console.error('Erro ao inicializar WhatsApp:', error.message);
+    console.log('O servidor continuará rodando sem WhatsApp.');
+  }
+
+  // Inicia worker de automação
+  workerService.start();
+});
+
+export default app;

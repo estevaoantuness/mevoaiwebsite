@@ -22,3 +22,9 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Backend
+backend/.env
+backend/database/*.sqlite
+backend/.wwebjs_auth/
+backend/.wwebjs_cache/
