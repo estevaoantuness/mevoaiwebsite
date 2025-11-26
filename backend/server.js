@@ -1,6 +1,11 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 // Importa o banco (inicializa e cria tabelas)
 import dbPromise from './database/db.js';
@@ -46,21 +51,34 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// Rota raiz
-app.get('/', (req, res) => {
-  res.json({
-    name: 'Mevo API',
-    version: '1.0.0',
-    endpoints: [
-      'POST /api/auth/login',
-      'GET /api/properties',
-      'GET /api/settings',
-      'GET /api/whatsapp/status',
-      'GET /api/dashboard/stats',
-      'GET /api/logs'
-    ]
+// Serve frontend estático em produção
+if (process.env.NODE_ENV === 'production') {
+  app.use(express.static(join(__dirname, '..', 'dist')));
+
+  // SPA fallback - todas as rotas não-API vão para o index.html
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api')) {
+      return next();
+    }
+    res.sendFile(join(__dirname, '..', 'dist', 'index.html'));
   });
-});
+} else {
+  // Rota raiz em desenvolvimento
+  app.get('/', (req, res) => {
+    res.json({
+      name: 'Mevo API',
+      version: '1.0.0',
+      endpoints: [
+        'POST /api/auth/login',
+        'GET /api/properties',
+        'GET /api/settings',
+        'GET /api/whatsapp/status',
+        'GET /api/dashboard/stats',
+        'GET /api/logs'
+      ]
+    });
+  });
+}
 
 // Error handler
 app.use((err, req, res, next) => {
