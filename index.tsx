@@ -36,12 +36,20 @@ const api = {
       },
     });
 
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: 'Erro desconhecido' }));
-      throw new Error(error.error || 'Erro na requisição');
+    const text = await response.text();
+
+    if (!text) {
+      if (!response.ok) throw new Error('Erro na requisição');
+      return {};
     }
 
-    return response.json();
+    const data = JSON.parse(text);
+
+    if (!response.ok) {
+      throw new Error(data.error || 'Erro na requisição');
+    }
+
+    return data;
   },
 
   // Auth
