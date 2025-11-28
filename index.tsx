@@ -692,13 +692,14 @@ const Dashboard = ({ onLogout }: DashboardProps) => {
 // --- App Root ---
 
 const App = () => {
-  const [page, setPage] = useState('landing'); // 'landing', 'login', 'dashboard'
+  // TODO: Reativar login depois
+  const [page, setPage] = useState('dashboard'); // 'landing', 'login', 'dashboard'
 
-  useEffect(() => {
-    // Check for token
-    const token = localStorage.getItem('mevo_token');
-    if (token) setPage('dashboard');
-  }, []);
+  // useEffect(() => {
+  //   // Check for token
+  //   const token = localStorage.getItem('mevo_token');
+  //   if (token) setPage('dashboard');
+  // }, []);
 
   const handleLoginSuccess = () => {
     setPage('dashboard');

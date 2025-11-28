@@ -4,7 +4,8 @@ import { authMiddleware } from '../middleware/auth.middleware.js';
 
 const router = Router();
 
-router.use(authMiddleware);
+// TODO: Reativar autenticação depois
+// router.use(authMiddleware);
 
 // GET /api/settings - Retorna todas as configurações
 router.get('/', async (req, res) => {

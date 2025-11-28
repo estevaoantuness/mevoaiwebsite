@@ -6,7 +6,8 @@ import workerService from '../services/worker.service.js';
 
 const router = Router();
 
-router.use(authMiddleware);
+// TODO: Reativar autenticação depois
+// router.use(authMiddleware);
 
 // GET /api/dashboard/stats - Estatísticas gerais
 router.get('/stats', async (req, res) => {
