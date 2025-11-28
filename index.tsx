@@ -693,13 +693,7 @@ const Dashboard = ({ onLogout }: DashboardProps) => {
 
 const App = () => {
   // TODO: Reativar login depois
-  const [page, setPage] = useState('dashboard'); // 'landing', 'login', 'dashboard'
-
-  // useEffect(() => {
-  //   // Check for token
-  //   const token = localStorage.getItem('mevo_token');
-  //   if (token) setPage('dashboard');
-  // }, []);
+  const [page, setPage] = useState('landing'); // 'landing', 'login', 'dashboard'
 
   const handleLoginSuccess = () => {
     setPage('dashboard');
@@ -712,8 +706,9 @@ const App = () => {
 
   return (
     <>
-      {page === 'landing' && <LandingPage onLogin={() => setPage('login')} />}
-      {page === 'login' && <LoginPage onLoginSuccess={handleLoginSuccess} onBack={() => setPage('landing')} />}
+      {page === 'landing' && <LandingPage onLogin={() => setPage('dashboard')} />}
+      {/* TODO: Reativar login depois */}
+      {/* {page === 'login' && <LoginPage onLoginSuccess={handleLoginSuccess} onBack={() => setPage('landing')} />} */}
       {page === 'dashboard' && <Dashboard onLogout={handleLogout} />}
     </>
   );
