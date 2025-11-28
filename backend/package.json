@@ -5,20 +5,29 @@
   "main": "server.js",
   "type": "module",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node --watch server.js"
+    "start": "prisma migrate deploy && node prisma/seed.js && node server.js",
+    "dev": "node --watch server.js",
+    "postinstall": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:push": "prisma db push",
+    "db:seed": "node prisma/seed.js",
+    "db:studio": "prisma studio"
+  },
+  "prisma": {
+    "seed": "node prisma/seed.js"
   },
   "dependencies": {
-    "express": "^4.18.2",
-    "cors": "^2.8.5",
-    "sql.js": "^1.10.3",
+    "@prisma/client": "^7.0.1",
     "bcryptjs": "^2.4.3",
-    "jsonwebtoken": "^9.0.2",
-    "whatsapp-web.js": "^1.23.0",
-    "qrcode": "^1.5.3",
-    "node-ical": "^0.18.0",
-    "node-cron": "^3.0.3",
+    "cors": "^2.8.5",
+    "dayjs": "^1.11.10",
     "dotenv": "^16.4.1",
-    "dayjs": "^1.11.10"
+    "express": "^4.18.2",
+    "jsonwebtoken": "^9.0.2",
+    "node-cron": "^3.0.3",
+    "node-ical": "^0.18.0",
+    "prisma": "^7.0.1",
+    "qrcode": "^1.5.3",
+    "whatsapp-web.js": "^1.23.0"
   }
 }

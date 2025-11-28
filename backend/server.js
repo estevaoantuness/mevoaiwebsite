@@ -7,9 +7,6 @@ import { dirname, join } from 'path';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// Importa o banco (inicializa e cria tabelas)
-import dbPromise from './database/db.js';
-
 // Importa rotas
 import authRoutes from './routes/auth.js';
 import propertiesRoutes from './routes/properties.js';
@@ -86,16 +83,13 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Erro interno do servidor' });
 });
 
-// Inicializa servidor após banco estar pronto
+// Inicializa servidor
 async function startServer() {
-  // Aguarda banco inicializar
-  await dbPromise;
-  console.log('Banco de dados inicializado');
-
   app.listen(PORT, async () => {
     console.log(`
   ╔═══════════════════════════════════════╗
   ║         MEVO Backend v1.0.0           ║
+  ║         PostgreSQL + Prisma           ║
   ╠═══════════════════════════════════════╣
   ║  Servidor rodando na porta ${PORT}       ║
   ║  http://localhost:${PORT}                ║

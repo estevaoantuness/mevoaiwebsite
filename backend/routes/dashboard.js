@@ -1,68 +1,110 @@
 import { Router } from 'express';
 import dayjs from 'dayjs';
-import dbPromise from '../database/db.js';
+import prisma from '../lib/prisma.js';
 import { authMiddleware } from '../middleware/auth.middleware.js';
 import workerService from '../services/worker.service.js';
-
-let db;
-dbPromise.then(d => db = d);
 
 const router = Router();
 
 router.use(authMiddleware);
 
 // GET /api/dashboard/stats - Estatísticas gerais
-router.get('/stats', (req, res) => {
-  const today = dayjs().format('YYYY-MM-DD');
+router.get('/stats', async (req, res) => {
+  try {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
 
-  const totalProperties = db.prepare('SELECT COUNT(*) as count FROM properties').get().count;
+    const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+    const endOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0, 23, 59, 59);
 
-  const messagesToday = db.prepare(`
-    SELECT COUNT(*) as count FROM message_logs
-    WHERE DATE(sent_at) = ?
-  `).get(today).count;
+    const [totalProperties, messagesToday, messagesThisMonth, failedMessages] = await Promise.all([
+      prisma.property.count(),
 
-  const messagesThisMonth = db.prepare(`
-    SELECT COUNT(*) as count FROM message_logs
-    WHERE strftime('%Y-%m', sent_at) = strftime('%Y-%m', 'now')
-  `).get().count;
+      prisma.messageLog.count({
+        where: {
+          sentAt: {
+            gte: today,
+            lt: tomorrow
+          }
+        }
+      }),
 
-  const failedMessages = db.prepare(`
-    SELECT COUNT(*) as count FROM message_logs
-    WHERE status = 'failed' AND DATE(sent_at) = ?
-  `).get(today).count;
+      prisma.messageLog.count({
+        where: {
+          sentAt: {
+            gte: startOfMonth,
+            lte: endOfMonth
+          }
+        }
+      }),
 
-  res.json({
-    totalProperties,
-    messagesToday,
-    messagesThisMonth,
-    failedMessages
-  });
+      prisma.messageLog.count({
+        where: {
+          status: 'failed',
+          sentAt: {
+            gte: today,
+            lt: tomorrow
+          }
+        }
+      })
+    ]);
+
+    res.json({
+      totalProperties,
+      messagesToday,
+      messagesThisMonth,
+      failedMessages
+    });
+  } catch (error) {
+    console.error('Erro ao buscar estatísticas:', error);
+    res.status(500).json({ error: 'Erro ao buscar estatísticas' });
+  }
 });
 
 // GET /api/logs - Histórico de mensagens
-router.get('/logs', (req, res) => {
-  const limit = parseInt(req.query.limit) || 50;
-  const offset = parseInt(req.query.offset) || 0;
+router.get('/logs', async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 50;
+    const offset = parseInt(req.query.offset) || 0;
 
-  const logs = db.prepare(`
-    SELECT
-      ml.*,
-      p.name as property_name
-    FROM message_logs ml
-    LEFT JOIN properties p ON ml.property_id = p.id
-    ORDER BY ml.sent_at DESC
-    LIMIT ? OFFSET ?
-  `).all(limit, offset);
+    const [logs, total] = await Promise.all([
+      prisma.messageLog.findMany({
+        include: {
+          property: {
+            select: { name: true }
+          }
+        },
+        orderBy: { sentAt: 'desc' },
+        take: limit,
+        skip: offset
+      }),
 
-  const total = db.prepare('SELECT COUNT(*) as count FROM message_logs').get().count;
+      prisma.messageLog.count()
+    ]);
 
-  res.json({
-    logs,
-    total,
-    limit,
-    offset
-  });
+    // Mapear para manter compatibilidade com frontend
+    const mappedLogs = logs.map(log => ({
+      id: log.id,
+      property_id: log.propertyId,
+      employee_phone: log.employeePhone,
+      message: log.message,
+      sent_at: log.sentAt,
+      status: log.status,
+      property_name: log.property?.name || null
+    }));
+
+    res.json({
+      logs: mappedLogs,
+      total,
+      limit,
+      offset
+    });
+  } catch (error) {
+    console.error('Erro ao buscar logs:', error);
+    res.status(500).json({ error: 'Erro ao buscar logs' });
+  }
 });
 
 // POST /api/dashboard/run-worker - Executar worker manualmente

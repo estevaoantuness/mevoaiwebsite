@@ -1,11 +1,8 @@
 import cron from 'node-cron';
 import dayjs from 'dayjs';
-import dbPromise from '../database/db.js';
+import prisma from '../lib/prisma.js';
 import icalService from './ical.service.js';
 import whatsappService from './whatsapp.service.js';
-
-let db;
-dbPromise.then(d => db = d);
 
 class WorkerService {
   constructor() {
@@ -44,14 +41,17 @@ class WorkerService {
 
     this.isRunning = true;
     const today = dayjs().format('YYYY-MM-DD');
+    const todayDate = new Date(today);
 
     try {
       // Busca configuração de horário padrão
-      const defaultTime = db.prepare("SELECT value FROM settings WHERE key = 'default_checkout_time'").get();
-      const defaultCheckoutTime = defaultTime?.value || '11:00';
+      const defaultTimeSetting = await prisma.setting.findUnique({
+        where: { key: 'default_checkout_time' }
+      });
+      const defaultCheckoutTime = defaultTimeSetting?.value || '11:00';
 
       // Busca todos os imóveis
-      const properties = db.prepare('SELECT * FROM properties').all();
+      const properties = await prisma.property.findMany();
 
       if (properties.length === 0) {
         console.log('Nenhum imóvel cadastrado');
@@ -62,21 +62,35 @@ class WorkerService {
       const allCheckouts = [];
 
       for (const property of properties) {
-        const checkouts = await icalService.getCheckoutsForProperty(property);
+        // Mapear para formato esperado pelo icalService
+        const propertyMapped = {
+          id: property.id,
+          name: property.name,
+          ical_airbnb: property.icalAirbnb,
+          ical_booking: property.icalBooking,
+          employee_name: property.employeeName,
+          employee_phone: property.employeePhone,
+          checkout_time: property.checkoutTime
+        };
+
+        const checkouts = await icalService.getCheckoutsForProperty(propertyMapped);
 
         for (const checkout of checkouts) {
           // Verifica se já foi processado
-          const processed = db.prepare(`
-            SELECT id FROM processed_events
-            WHERE property_id = ? AND event_uid = ? AND event_date = ?
-          `).get(property.id, checkout.uid, today);
+          const processed = await prisma.processedEvent.findFirst({
+            where: {
+              propertyId: property.id,
+              eventUid: checkout.uid,
+              eventDate: todayDate
+            }
+          });
 
           if (!processed) {
             allCheckouts.push({
               ...checkout,
-              employeeName: property.employee_name,
-              employeePhone: property.employee_phone,
-              checkoutTime: property.checkout_time || defaultCheckoutTime
+              employeeName: property.employeeName,
+              employeePhone: property.employeePhone,
+              checkoutTime: property.checkoutTime || defaultCheckoutTime
             });
           }
         }
@@ -100,16 +114,31 @@ class WorkerService {
           // Registra no log e marca como processado
           for (const checkout of data.checkouts) {
             // Log da mensagem
-            db.prepare(`
-              INSERT INTO message_logs (property_id, employee_phone, message, status)
-              VALUES (?, ?, ?, 'sent')
-            `).run(checkout.propertyId, phone, message);
+            await prisma.messageLog.create({
+              data: {
+                propertyId: checkout.propertyId,
+                employeePhone: phone,
+                message: message,
+                status: 'sent'
+              }
+            });
 
-            // Marca evento como processado
-            db.prepare(`
-              INSERT OR IGNORE INTO processed_events (property_id, event_uid, event_date)
-              VALUES (?, ?, ?)
-            `).run(checkout.propertyId, checkout.uid, today);
+            // Marca evento como processado (upsert para evitar duplicação)
+            await prisma.processedEvent.upsert({
+              where: {
+                propertyId_eventUid_eventDate: {
+                  propertyId: checkout.propertyId,
+                  eventUid: checkout.uid,
+                  eventDate: todayDate
+                }
+              },
+              update: {},
+              create: {
+                propertyId: checkout.propertyId,
+                eventUid: checkout.uid,
+                eventDate: todayDate
+              }
+            });
           }
 
           console.log(`Mensagem enviada para ${data.employeeName} (${phone})`);
@@ -117,10 +146,14 @@ class WorkerService {
           console.error(`Erro ao enviar para ${phone}:`, error);
 
           // Registra falha
-          db.prepare(`
-            INSERT INTO message_logs (property_id, employee_phone, message, status)
-            VALUES (?, ?, ?, 'failed')
-          `).run(data.checkouts[0]?.propertyId, phone, message);
+          await prisma.messageLog.create({
+            data: {
+              propertyId: data.checkouts[0]?.propertyId,
+              employeePhone: phone,
+              message: message,
+              status: 'failed'
+            }
+          });
         }
       }
 

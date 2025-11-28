@@ -1,43 +1,51 @@
 import { Router } from 'express';
-import dbPromise from '../database/db.js';
+import prisma from '../lib/prisma.js';
 import { authMiddleware } from '../middleware/auth.middleware.js';
-
-let db;
-dbPromise.then(d => db = d);
 
 const router = Router();
 
 router.use(authMiddleware);
 
 // GET /api/settings - Retorna todas as configurações
-router.get('/', (req, res) => {
-  const settings = db.prepare('SELECT * FROM settings').all();
+router.get('/', async (req, res) => {
+  try {
+    const settings = await prisma.setting.findMany();
 
-  // Converte para objeto { key: value }
-  const settingsObj = settings.reduce((acc, s) => {
-    acc[s.key] = s.value;
-    return acc;
-  }, {});
+    // Converte para objeto { key: value }
+    const settingsObj = settings.reduce((acc, s) => {
+      acc[s.key] = s.value;
+      return acc;
+    }, {});
 
-  res.json(settingsObj);
+    res.json(settingsObj);
+  } catch (error) {
+    console.error('Erro ao buscar configurações:', error);
+    res.status(500).json({ error: 'Erro ao buscar configurações' });
+  }
 });
 
 // PUT /api/settings/:key - Atualiza uma configuração
-router.put('/:key', (req, res) => {
-  const { key } = req.params;
-  const { value } = req.body;
+router.put('/:key', async (req, res) => {
+  try {
+    const { key } = req.params;
+    const { value } = req.body;
 
-  if (value === undefined) {
-    return res.status(400).json({ error: 'Valor é obrigatório' });
+    if (value === undefined) {
+      return res.status(400).json({ error: 'Valor é obrigatório' });
+    }
+
+    // Upsert: insere ou atualiza
+    const setting = await prisma.setting.upsert({
+      where: { key },
+      update: { value },
+      create: { key, value }
+    });
+
+    res.json({ key: setting.key, value: setting.value });
+  } catch (error) {
+    console.error('Erro ao atualizar configuração:', error);
+    res.status(500).json({ error: 'Erro ao atualizar configuração' });
   }
-
-  // Upsert: insere ou atualiza
-  db.prepare(`
-    INSERT INTO settings (key, value) VALUES (?, ?)
-    ON CONFLICT(key) DO UPDATE SET value = excluded.value
-  `).run(key, value);
-
-  res.json({ key, value });
 });
 
 export default router;

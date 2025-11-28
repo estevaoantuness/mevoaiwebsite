@@ -1,9 +1,6 @@
 import { Router } from 'express';
-import dbPromise from '../database/db.js';
+import prisma from '../lib/prisma.js';
 import { authMiddleware } from '../middleware/auth.middleware.js';
-
-let db;
-dbPromise.then(d => db = d);
 
 const router = Router();
 
@@ -11,79 +8,149 @@ const router = Router();
 router.use(authMiddleware);
 
 // GET /api/properties - Listar todos os imóveis
-router.get('/', (req, res) => {
-  const properties = db.prepare('SELECT * FROM properties ORDER BY created_at DESC').all();
-  res.json(properties);
+router.get('/', async (req, res) => {
+  try {
+    const properties = await prisma.property.findMany({
+      orderBy: { createdAt: 'desc' }
+    });
+
+    // Mapear para manter compatibilidade com frontend (snake_case)
+    const mapped = properties.map(p => ({
+      id: p.id,
+      name: p.name,
+      ical_airbnb: p.icalAirbnb,
+      ical_booking: p.icalBooking,
+      employee_name: p.employeeName,
+      employee_phone: p.employeePhone,
+      checkout_time: p.checkoutTime,
+      created_at: p.createdAt
+    }));
+
+    res.json(mapped);
+  } catch (error) {
+    console.error('Erro ao listar imóveis:', error);
+    res.status(500).json({ error: 'Erro ao listar imóveis' });
+  }
 });
 
 // GET /api/properties/:id - Buscar um imóvel
-router.get('/:id', (req, res) => {
-  const property = db.prepare('SELECT * FROM properties WHERE id = ?').get(req.params.id);
+router.get('/:id', async (req, res) => {
+  try {
+    const property = await prisma.property.findUnique({
+      where: { id: parseInt(req.params.id) }
+    });
 
-  if (!property) {
-    return res.status(404).json({ error: 'Imóvel não encontrado' });
+    if (!property) {
+      return res.status(404).json({ error: 'Imóvel não encontrado' });
+    }
+
+    res.json({
+      id: property.id,
+      name: property.name,
+      ical_airbnb: property.icalAirbnb,
+      ical_booking: property.icalBooking,
+      employee_name: property.employeeName,
+      employee_phone: property.employeePhone,
+      checkout_time: property.checkoutTime,
+      created_at: property.createdAt
+    });
+  } catch (error) {
+    console.error('Erro ao buscar imóvel:', error);
+    res.status(500).json({ error: 'Erro ao buscar imóvel' });
   }
-
-  res.json(property);
 });
 
 // POST /api/properties - Criar novo imóvel
-router.post('/', (req, res) => {
-  const { name, ical_airbnb, ical_booking, employee_name, employee_phone, checkout_time } = req.body;
+router.post('/', async (req, res) => {
+  try {
+    const { name, ical_airbnb, ical_booking, employee_name, employee_phone, checkout_time } = req.body;
 
-  if (!name || !employee_name || !employee_phone) {
-    return res.status(400).json({ error: 'Nome, funcionária e telefone são obrigatórios' });
+    if (!name || !employee_name || !employee_phone) {
+      return res.status(400).json({ error: 'Nome, funcionária e telefone são obrigatórios' });
+    }
+
+    const property = await prisma.property.create({
+      data: {
+        name,
+        icalAirbnb: ical_airbnb || null,
+        icalBooking: ical_booking || null,
+        employeeName: employee_name,
+        employeePhone: employee_phone,
+        checkoutTime: checkout_time || null
+      }
+    });
+
+    res.status(201).json({
+      id: property.id,
+      name: property.name,
+      ical_airbnb: property.icalAirbnb,
+      ical_booking: property.icalBooking,
+      employee_name: property.employeeName,
+      employee_phone: property.employeePhone,
+      checkout_time: property.checkoutTime,
+      created_at: property.createdAt
+    });
+  } catch (error) {
+    console.error('Erro ao criar imóvel:', error);
+    res.status(500).json({ error: 'Erro ao criar imóvel' });
   }
-
-  const result = db.prepare(`
-    INSERT INTO properties (name, ical_airbnb, ical_booking, employee_name, employee_phone, checkout_time)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).run(name, ical_airbnb || null, ical_booking || null, employee_name, employee_phone, checkout_time || null);
-
-  const newProperty = db.prepare('SELECT * FROM properties WHERE id = ?').get(result.lastInsertRowid);
-
-  res.status(201).json(newProperty);
 });
 
 // PUT /api/properties/:id - Atualizar imóvel
-router.put('/:id', (req, res) => {
-  const { name, ical_airbnb, ical_booking, employee_name, employee_phone, checkout_time } = req.body;
-  const { id } = req.params;
+router.put('/:id', async (req, res) => {
+  try {
+    const { name, ical_airbnb, ical_booking, employee_name, employee_phone, checkout_time } = req.body;
+    const id = parseInt(req.params.id);
 
-  const existing = db.prepare('SELECT * FROM properties WHERE id = ?').get(id);
-  if (!existing) {
-    return res.status(404).json({ error: 'Imóvel não encontrado' });
+    const existing = await prisma.property.findUnique({ where: { id } });
+    if (!existing) {
+      return res.status(404).json({ error: 'Imóvel não encontrado' });
+    }
+
+    const property = await prisma.property.update({
+      where: { id },
+      data: {
+        name: name || existing.name,
+        icalAirbnb: ical_airbnb !== undefined ? ical_airbnb : existing.icalAirbnb,
+        icalBooking: ical_booking !== undefined ? ical_booking : existing.icalBooking,
+        employeeName: employee_name || existing.employeeName,
+        employeePhone: employee_phone || existing.employeePhone,
+        checkoutTime: checkout_time !== undefined ? checkout_time : existing.checkoutTime
+      }
+    });
+
+    res.json({
+      id: property.id,
+      name: property.name,
+      ical_airbnb: property.icalAirbnb,
+      ical_booking: property.icalBooking,
+      employee_name: property.employeeName,
+      employee_phone: property.employeePhone,
+      checkout_time: property.checkoutTime,
+      created_at: property.createdAt
+    });
+  } catch (error) {
+    console.error('Erro ao atualizar imóvel:', error);
+    res.status(500).json({ error: 'Erro ao atualizar imóvel' });
   }
-
-  db.prepare(`
-    UPDATE properties
-    SET name = ?, ical_airbnb = ?, ical_booking = ?, employee_name = ?, employee_phone = ?, checkout_time = ?
-    WHERE id = ?
-  `).run(
-    name || existing.name,
-    ical_airbnb !== undefined ? ical_airbnb : existing.ical_airbnb,
-    ical_booking !== undefined ? ical_booking : existing.ical_booking,
-    employee_name || existing.employee_name,
-    employee_phone || existing.employee_phone,
-    checkout_time !== undefined ? checkout_time : existing.checkout_time,
-    id
-  );
-
-  const updated = db.prepare('SELECT * FROM properties WHERE id = ?').get(id);
-  res.json(updated);
 });
 
 // DELETE /api/properties/:id - Remover imóvel
-router.delete('/:id', (req, res) => {
-  const { id } = req.params;
+router.delete('/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
 
-  const existing = db.prepare('SELECT * FROM properties WHERE id = ?').get(id);
-  if (!existing) {
-    return res.status(404).json({ error: 'Imóvel não encontrado' });
+    const existing = await prisma.property.findUnique({ where: { id } });
+    if (!existing) {
+      return res.status(404).json({ error: 'Imóvel não encontrado' });
+    }
+
+    await prisma.property.delete({ where: { id } });
+    res.json({ message: 'Imóvel removido com sucesso' });
+  } catch (error) {
+    console.error('Erro ao remover imóvel:', error);
+    res.status(500).json({ error: 'Erro ao remover imóvel' });
   }
-
-  db.prepare('DELETE FROM properties WHERE id = ?').run(id);
-  res.json({ message: 'Imóvel removido com sucesso' });
 });
 
 export default router;
