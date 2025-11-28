@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build && cd backend && npm install",
-    "start": "cd backend && NODE_ENV=production node server.js",
+    "start": "cd backend && npx prisma db push && node prisma/seed.js && NODE_ENV=production node server.js",
     "preview": "vite preview"
   },
   "dependencies": {
