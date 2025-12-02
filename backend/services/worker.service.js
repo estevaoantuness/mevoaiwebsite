@@ -16,24 +16,55 @@ class WorkerService {
     // Executa todo dia às 08:00
     cron.schedule('0 8 * * *', () => {
       console.log('Worker iniciado às', new Date().toLocaleString());
-      this.processCheckouts();
+      this.processAllUsers();
     });
 
     console.log('Worker agendado para 08:00 diariamente');
   }
 
   /**
-   * Executa o processamento manualmente (para testes)
+   * Executa o processamento manualmente para um usuário específico
    */
-  async runNow() {
+  async runNow(userId = null) {
     console.log('Executando worker manualmente...');
-    await this.processCheckouts();
+
+    if (userId) {
+      await this.processCheckoutsForUser(userId);
+    } else {
+      await this.processAllUsers();
+    }
   }
 
   /**
-   * Processa todos os checkouts do dia
+   * Processa checkouts para todos os usuários
    */
-  async processCheckouts() {
+  async processAllUsers() {
+    // Verifica se WhatsApp está conectado ANTES de processar
+    const whatsappStatus = whatsappService.getStatus();
+    if (whatsappStatus.status !== 'connected') {
+      console.log('WhatsApp não está conectado. Abortando worker.');
+      return;
+    }
+
+    const users = await prisma.user.findMany({
+      where: {
+        properties: {
+          some: {} // Apenas usuários que têm pelo menos 1 imóvel
+        }
+      }
+    });
+
+    console.log(`Processando ${users.length} usuário(s)...`);
+
+    for (const user of users) {
+      await this.processCheckoutsForUser(user.id);
+    }
+  }
+
+  /**
+   * Processa checkouts de um usuário específico
+   */
+  async processCheckoutsForUser(userId) {
     if (this.isRunning) {
       console.log('Worker já está em execução');
       return;
@@ -44,21 +75,37 @@ class WorkerService {
     const todayDate = new Date(today);
 
     try {
-      // Busca configuração de horário padrão
-      const defaultTimeSetting = await prisma.setting.findUnique({
-        where: { key: 'default_checkout_time' }
-      });
-      const defaultCheckoutTime = defaultTimeSetting?.value || '11:00';
-
-      // Busca todos os imóveis
-      const properties = await prisma.property.findMany();
-
-      if (properties.length === 0) {
-        console.log('Nenhum imóvel cadastrado');
+      // Verifica se WhatsApp está conectado
+      const whatsappStatus = whatsappService.getStatus();
+      if (whatsappStatus.status !== 'connected') {
+        console.log('WhatsApp não está conectado. Abortando.');
         return;
       }
 
-      // Coleta checkouts de todos os imóveis
+      // Busca configurações do usuário (ou globais como fallback)
+      const messageTemplateSetting = await prisma.setting.findUnique({
+        where: { key: 'message_template' }
+      });
+      const defaultTimeSetting = await prisma.setting.findUnique({
+        where: { key: 'default_checkout_time' }
+      });
+
+      const messageTemplate = messageTemplateSetting?.value || null;
+      const defaultCheckoutTime = defaultTimeSetting?.value || '11:00';
+
+      // Busca apenas os imóveis do usuário específico
+      const properties = await prisma.property.findMany({
+        where: { userId: userId }
+      });
+
+      if (properties.length === 0) {
+        console.log(`Usuário ${userId}: Nenhum imóvel cadastrado`);
+        return;
+      }
+
+      console.log(`Usuário ${userId}: Processando ${properties.length} imóvel(is)...`);
+
+      // Coleta checkouts de todos os imóveis do usuário
       const allCheckouts = [];
 
       for (const property of properties) {
@@ -97,7 +144,7 @@ class WorkerService {
       }
 
       if (allCheckouts.length === 0) {
-        console.log('Nenhum checkout para hoje');
+        console.log(`Usuário ${userId}: Nenhum checkout para hoje`);
         return;
       }
 
@@ -106,7 +153,10 @@ class WorkerService {
 
       // Envia mensagens
       for (const [phone, data] of Object.entries(groupedByEmployee)) {
-        const message = this.buildMessage(data);
+        // Usa template personalizado ou mensagem padrão
+        const message = messageTemplate
+          ? this.buildMessageFromTemplate(messageTemplate, data)
+          : this.buildMessage(data);
 
         try {
           await whatsappService.sendMessage(phone, message);
@@ -157,9 +207,9 @@ class WorkerService {
         }
       }
 
-      console.log(`Worker finalizado. ${allCheckouts.length} checkout(s) processado(s).`);
+      console.log(`Usuário ${userId}: ${allCheckouts.length} checkout(s) processado(s).`);
     } catch (error) {
-      console.error('Erro no worker:', error);
+      console.error(`Erro no worker para usuário ${userId}:`, error);
     } finally {
       this.isRunning = false;
     }
@@ -188,7 +238,29 @@ class WorkerService {
   }
 
   /**
-   * Monta mensagem consolidada para a funcionária
+   * Monta mensagem a partir do template do banco
+   */
+  buildMessageFromTemplate(template, data) {
+    const { employeeName, checkouts } = data;
+
+    if (checkouts.length === 1) {
+      const c = checkouts[0];
+      return template
+        .replace(/\(nome da funcionária\)/gi, employeeName)
+        .replace(/\(nome do imóvel\)/gi, c.propertyName)
+        .replace(/\(horário\)/gi, c.checkoutTime);
+    }
+
+    // Múltiplos imóveis - usa template para cada um e junta
+    const propertyList = checkouts
+      .map(c => `• ${c.propertyName} às ${c.checkoutTime}`)
+      .join('\n');
+
+    return `Olá ${employeeName}! Hoje você tem ${checkouts.length} limpezas:\n\n${propertyList}\n\nBom trabalho!`;
+  }
+
+  /**
+   * Monta mensagem padrão (fallback)
    */
   buildMessage(data) {
     const { employeeName, checkouts } = data;

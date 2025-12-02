@@ -59,7 +59,9 @@ cd backend && npm install && cd ..
 PORT=3001
 NODE_ENV=development
 JWT_SECRET=sua-chave-secreta
+FRONTEND_URL=http://localhost:5173
 ```
+`FRONTEND_URL` aceita múltiplos domínios separados por vírgula para liberar CORS do frontend.
 
 5. Inicie em modo desenvolvimento:
 ```bash

@@ -6,12 +6,13 @@ import workerService from '../services/worker.service.js';
 
 const router = Router();
 
-// TODO: Reativar autenticação depois
-// router.use(authMiddleware);
+// Proteger todas as rotas do dashboard
+router.use(authMiddleware);
 
-// GET /api/dashboard/stats - Estatísticas gerais
+// GET /api/dashboard/stats - Estatísticas do usuário logado
 router.get('/stats', async (req, res) => {
   try {
+    const userId = req.userId;
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const tomorrow = new Date(today);
@@ -20,11 +21,21 @@ router.get('/stats', async (req, res) => {
     const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
     const endOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0, 23, 59, 59);
 
+    // Busca IDs das propriedades do usuário
+    const userProperties = await prisma.property.findMany({
+      where: { userId },
+      select: { id: true }
+    });
+    const propertyIds = userProperties.map(p => p.id);
+
     const [totalProperties, messagesToday, messagesThisMonth, failedMessages] = await Promise.all([
-      prisma.property.count(),
+      prisma.property.count({
+        where: { userId }
+      }),
 
       prisma.messageLog.count({
         where: {
+          propertyId: { in: propertyIds },
           sentAt: {
             gte: today,
             lt: tomorrow
@@ -34,6 +45,7 @@ router.get('/stats', async (req, res) => {
 
       prisma.messageLog.count({
         where: {
+          propertyId: { in: propertyIds },
           sentAt: {
             gte: startOfMonth,
             lte: endOfMonth
@@ -43,6 +55,7 @@ router.get('/stats', async (req, res) => {
 
       prisma.messageLog.count({
         where: {
+          propertyId: { in: propertyIds },
           status: 'failed',
           sentAt: {
             gte: today,
@@ -64,14 +77,25 @@ router.get('/stats', async (req, res) => {
   }
 });
 
-// GET /api/logs - Histórico de mensagens
+// GET /api/logs - Histórico de mensagens do usuário
 router.get('/logs', async (req, res) => {
   try {
+    const userId = req.userId;
     const limit = parseInt(req.query.limit) || 50;
     const offset = parseInt(req.query.offset) || 0;
 
+    // Busca IDs das propriedades do usuário
+    const userProperties = await prisma.property.findMany({
+      where: { userId },
+      select: { id: true }
+    });
+    const propertyIds = userProperties.map(p => p.id);
+
     const [logs, total] = await Promise.all([
       prisma.messageLog.findMany({
+        where: {
+          propertyId: { in: propertyIds }
+        },
         include: {
           property: {
             select: { name: true }
@@ -82,7 +106,11 @@ router.get('/logs', async (req, res) => {
         skip: offset
       }),
 
-      prisma.messageLog.count()
+      prisma.messageLog.count({
+        where: {
+          propertyId: { in: propertyIds }
+        }
+      })
     ]);
 
     // Mapear para manter compatibilidade com frontend
@@ -108,10 +136,11 @@ router.get('/logs', async (req, res) => {
   }
 });
 
-// POST /api/dashboard/run-worker - Executar worker manualmente
+// POST /api/dashboard/run-worker - Executar worker para o usuário logado
 router.post('/run-worker', async (req, res) => {
   try {
-    await workerService.runNow();
+    const userId = req.userId;
+    await workerService.runNow(userId);
     res.json({ message: 'Worker executado com sucesso' });
   } catch (error) {
     res.status(500).json({ error: error.message });

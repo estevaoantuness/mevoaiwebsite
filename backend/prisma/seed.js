@@ -15,12 +15,22 @@ async function main() {
     await prisma.user.create({
       data: {
         email: 'admin@mevo.app',
-        passwordHash: bcrypt.hashSync('admin', 10)
+        passwordHash: bcrypt.hashSync('admin', 10),
+        name: 'Administrador',
+        role: 'admin'
       }
     });
     console.log('Admin user created: admin@mevo.app / admin');
   } else {
-    console.log('Admin user already exists');
+    // Atualizar admin existente com name e role se necessario
+    await prisma.user.update({
+      where: { email: 'admin@mevo.app' },
+      data: {
+        name: adminExists.name || 'Administrador',
+        role: 'admin'
+      }
+    });
+    console.log('Admin user already exists - updated');
   }
 
   // Criar configuração padrão de horário de checkout

@@ -8,10 +8,13 @@ datasource db {
 }
 
 model User {
-  id           Int      @id @default(autoincrement())
-  email        String   @unique
-  passwordHash String   @map("password_hash")
-  createdAt    DateTime @default(now()) @map("created_at")
+  id           Int        @id @default(autoincrement())
+  email        String     @unique
+  passwordHash String     @map("password_hash")
+  name         String     @default("")
+  role         String     @default("user")
+  createdAt    DateTime   @default(now()) @map("created_at")
+  properties   Property[]
 
   @@map("users")
 }
@@ -32,7 +35,9 @@ model Property {
   employeePhone String   @map("employee_phone")
   checkoutTime  String?  @map("checkout_time")
   createdAt     DateTime @default(now()) @map("created_at")
+  userId        Int?     @map("user_id")
 
+  user            User?            @relation(fields: [userId], references: [id], onDelete: Cascade)
   messageLogs     MessageLog[]
   processedEvents ProcessedEvent[]
 

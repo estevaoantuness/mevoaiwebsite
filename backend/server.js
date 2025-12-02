@@ -1,11 +1,6 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
 
 // Importa rotas
 import authRoutes from './routes/auth.js';
@@ -21,8 +16,16 @@ import workerService from './services/worker.service.js';
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+const allowedOrigins = process.env.FRONTEND_URL
+  ? process.env.FRONTEND_URL.split(',').map((origin) => origin.trim()).filter(Boolean)
+  : [];
+
 // Middlewares
-app.use(cors());
+app.use(cors({
+  origin: allowedOrigins.length ? allowedOrigins : true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
 app.use(express.json());
 
 // Log de requisições
@@ -48,34 +51,23 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// Serve frontend estático em produção
-if (process.env.NODE_ENV === 'production') {
-  app.use(express.static(join(__dirname, '..', 'dist')));
-
-  // SPA fallback - todas as rotas não-API vão para o index.html
-  app.get('*', (req, res, next) => {
-    if (req.path.startsWith('/api')) {
-      return next();
-    }
-    res.sendFile(join(__dirname, '..', 'dist', 'index.html'));
+// Rota raiz - info da API
+app.get('/', (req, res) => {
+  res.json({
+    name: 'Mevo API',
+    version: '1.0.0',
+    status: 'running',
+    endpoints: [
+      'POST /api/auth/login',
+      'GET /api/properties',
+      'GET /api/settings',
+      'GET /api/whatsapp/status',
+      'GET /api/dashboard/stats',
+      'GET /api/logs',
+      'GET /api/health'
+    ]
   });
-} else {
-  // Rota raiz em desenvolvimento
-  app.get('/', (req, res) => {
-    res.json({
-      name: 'Mevo API',
-      version: '1.0.0',
-      endpoints: [
-        'POST /api/auth/login',
-        'GET /api/properties',
-        'GET /api/settings',
-        'GET /api/whatsapp/status',
-        'GET /api/dashboard/stats',
-        'GET /api/logs'
-      ]
-    });
-  });
-}
+});
 
 // Error handler
 app.use((err, req, res, next) => {
