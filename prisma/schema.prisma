@@ -1,0 +1,485 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// USUÁRIOS E AUTENTICAÇÃO
+// ============================================
+
+model User {
+  id           Int        @id @default(autoincrement())
+  email        String     @unique
+  passwordHash String     @map("password_hash")
+  name         String     @default("")
+  phone        String?
+  role         String     @default("user") // user, admin
+  isActive     Boolean    @default(true) @map("is_active")
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @default(now()) @updatedAt @map("updated_at")
+
+  // WhatsApp / Evolution API
+  whatsappInstance     String?   @map("whatsapp_instance") // Nome da instância na Evolution
+  whatsappConnected    Boolean   @default(false) @map("whatsapp_connected")
+  whatsappPhone        String?   @map("whatsapp_phone") // Número conectado
+  whatsappConnectedAt  DateTime? @map("whatsapp_connected_at")
+
+  // Relacionamentos
+  properties       Property[]
+  guests           Guest[]
+  reservations     Reservation[]
+  messageTemplates MessageTemplate[]
+  webhooks         Webhook[]
+  scheduledJobs    ScheduledJob[]
+  notificationLogs NotificationLog[]
+
+  @@map("users")
+}
+
+// ============================================
+// CONFIGURAÇÕES GLOBAIS
+// ============================================
+
+model Setting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@map("settings")
+}
+
+// ============================================
+// PROPRIEDADES / IMÓVEIS
+// ============================================
+
+model Property {
+  id              Int      @id @default(autoincrement())
+  name            String
+  address         String?
+  city            String?
+  state           String?
+  country         String   @default("Brasil")
+  postalCode      String?  @map("postal_code")
+
+  // Calendários iCal
+  icalAirbnb      String?  @map("ical_airbnb")
+  icalBooking     String?  @map("ical_booking")
+  icalOther       String?  @map("ical_other")
+
+  // Responsável pela limpeza
+  employeeName    String   @map("employee_name")
+  employeePhone   String   @map("employee_phone")
+
+  // Configurações
+  checkoutTime    String?  @map("checkout_time") // Horário padrão de checkout
+  checkinTime     String?  @map("checkin_time")  // Horário padrão de checkin
+  cleaningMinutes Int?     @map("cleaning_minutes") // Tempo estimado de limpeza
+
+  // Instruções
+  accessInstructions   String? @map("access_instructions")
+  cleaningInstructions String? @map("cleaning_instructions")
+  wifiName             String? @map("wifi_name")
+  wifiPassword         String? @map("wifi_password")
+
+  // Status
+  isActive        Boolean  @default(true) @map("is_active")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  // Relacionamentos
+  userId          Int?     @map("user_id")
+  user            User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  messageLogs     MessageLog[]
+  processedEvents ProcessedEvent[]
+  reservations    Reservation[]
+  maintenanceTasks MaintenanceTask[]
+
+  @@map("properties")
+}
+
+// ============================================
+// HÓSPEDES
+// ============================================
+
+model Guest {
+  id           Int      @id @default(autoincrement())
+  name         String
+  email        String?
+  phone        String?
+  whatsapp     String?
+  document     String?  // CPF, RG, Passaporte
+  documentType String?  @map("document_type") // cpf, rg, passport
+  nationality  String?
+  notes        String?
+
+  // Preferências
+  preferredLanguage String? @map("preferred_language") @default("pt-BR")
+
+  // Status
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  // Relacionamentos
+  userId       Int?     @map("user_id")
+  user         User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  reservations Reservation[]
+
+  @@map("guests")
+}
+
+// ============================================
+// RESERVAS
+// ============================================
+
+model Reservation {
+  id              Int      @id @default(autoincrement())
+
+  // Datas
+  checkinDate     DateTime @map("checkin_date")
+  checkoutDate    DateTime @map("checkout_date")
+  checkinTime     String?  @map("checkin_time")
+  checkoutTime    String?  @map("checkout_time")
+
+  // Origem da reserva
+  source          String   @default("manual") // airbnb, booking, manual, other
+  externalId      String?  @map("external_id") // ID da reserva na plataforma
+
+  // Valores
+  totalAmount     Decimal? @map("total_amount") @db.Decimal(10, 2)
+  currency        String   @default("BRL")
+
+  // Número de pessoas
+  adults          Int      @default(1)
+  children        Int      @default(0)
+  infants         Int      @default(0)
+
+  // Status
+  status          String   @default("confirmed") // pending, confirmed, cancelled, completed
+
+  // Comunicação
+  welcomeMessageSent    Boolean  @default(false) @map("welcome_message_sent")
+  checkinReminderSent   Boolean  @default(false) @map("checkin_reminder_sent")
+  checkoutReminderSent  Boolean  @default(false) @map("checkout_reminder_sent")
+  reviewRequestSent     Boolean  @default(false) @map("review_request_sent")
+
+  // Notas
+  guestNotes      String?  @map("guest_notes")
+  internalNotes   String?  @map("internal_notes")
+
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  // Relacionamentos
+  propertyId      Int      @map("property_id")
+  property        Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  guestId         Int?     @map("guest_id")
+  guest           Guest?   @relation(fields: [guestId], references: [id], onDelete: SetNull)
+
+  userId          Int?     @map("user_id")
+  user            User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  notificationLogs NotificationLog[]
+
+  @@index([checkinDate])
+  @@index([checkoutDate])
+  @@index([status])
+  @@map("reservations")
+}
+
+// ============================================
+// TAREFAS DE MANUTENÇÃO
+// ============================================
+
+model MaintenanceTask {
+  id          Int      @id @default(autoincrement())
+  title       String
+  description String?
+  priority    String   @default("normal") // low, normal, high, urgent
+  status      String   @default("pending") // pending, in_progress, completed, cancelled
+  dueDate     DateTime? @map("due_date")
+  completedAt DateTime? @map("completed_at")
+
+  // Responsável
+  assigneeName  String? @map("assignee_name")
+  assigneePhone String? @map("assignee_phone")
+
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at")
+
+  // Relacionamentos
+  propertyId  Int      @map("property_id")
+  property    Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@map("maintenance_tasks")
+}
+
+// ============================================
+// TEMPLATES DE MENSAGENS
+// ============================================
+
+model MessageTemplate {
+  id          Int      @id @default(autoincrement())
+  name        String
+  type        String   // welcome, checkin_reminder, checkout_reminder, cleaning, review_request, custom
+  channel     String   @default("whatsapp") // whatsapp, email, sms
+  subject     String?  // Para emails
+  content     String   // Conteúdo com placeholders: {{guest_name}}, {{property_name}}, {{checkin_date}}, etc.
+  isActive    Boolean  @default(true) @map("is_active")
+
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at")
+
+  // Relacionamentos
+  userId      Int?     @map("user_id")
+  user        User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("message_templates")
+}
+
+// ============================================
+// LOGS DE MENSAGENS
+// ============================================
+
+model MessageLog {
+  id            Int      @id @default(autoincrement())
+
+  // Destino
+  channel       String   @default("whatsapp") // whatsapp, email, sms
+  recipient     String   // Telefone ou email
+
+  // Conteúdo
+  subject       String?  // Para emails
+  message       String?
+  templateId    Int?     @map("template_id")
+  templateName  String?  @map("template_name")
+
+  // Status
+  status        String   @default("pending") // pending, sent, delivered, failed, read
+  errorMessage  String?  @map("error_message")
+
+  // Metadados
+  externalId    String?  @map("external_id") // ID do provedor (Twilio, etc)
+  sentAt        DateTime @default(now()) @map("sent_at")
+  deliveredAt   DateTime? @map("delivered_at")
+  readAt        DateTime? @map("read_at")
+
+  // Relacionamentos
+  propertyId    Int?     @map("property_id")
+  property      Property? @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+  @@index([sentAt])
+  @@map("message_logs")
+}
+
+// ============================================
+// EVENTOS PROCESSADOS (para evitar duplicação)
+// ============================================
+
+model ProcessedEvent {
+  id          Int      @id @default(autoincrement())
+  eventUid    String   @map("event_uid")
+  eventDate   DateTime @map("event_date") @db.Date
+  eventType   String   @default("checkout") @map("event_type") // checkout, checkin
+  processedAt DateTime @default(now()) @map("processed_at")
+
+  // Relacionamentos
+  propertyId  Int      @map("property_id")
+  property    Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@unique([propertyId, eventUid, eventDate, eventType])
+  @@map("processed_events")
+}
+
+// ============================================
+// JOBS AGENDADOS
+// ============================================
+
+model ScheduledJob {
+  id          Int      @id @default(autoincrement())
+  name        String
+  type        String   // send_notification, sync_calendar, cleanup, custom
+
+  // Agendamento
+  cronExpression String? @map("cron_expression") // Ex: "0 8 * * *" para 8h diariamente
+  runAt         DateTime? @map("run_at") // Para jobs únicos
+
+  // Payload (JSON)
+  payload     String?  @db.Text
+
+  // Status
+  status      String   @default("pending") // pending, running, completed, failed, cancelled
+  lastRunAt   DateTime? @map("last_run_at")
+  nextRunAt   DateTime? @map("next_run_at")
+  attempts    Int      @default(0)
+  maxAttempts Int      @default(3) @map("max_attempts")
+
+  // Resultado
+  result      String?  @db.Text
+  errorMessage String? @map("error_message")
+
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at")
+
+  // Relacionamentos
+  userId      Int?     @map("user_id")
+  user        User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+  @@index([nextRunAt])
+  @@map("scheduled_jobs")
+}
+
+// ============================================
+// WEBHOOKS
+// ============================================
+
+model Webhook {
+  id          Int      @id @default(autoincrement())
+  name        String
+  url         String
+  secret      String?  // Para assinatura HMAC
+
+  // Eventos que disparam o webhook
+  events      String[] // ["reservation.created", "reservation.cancelled", "message.sent", etc]
+
+  // Status
+  isActive    Boolean  @default(true) @map("is_active")
+
+  // Estatísticas
+  lastTriggeredAt DateTime? @map("last_triggered_at")
+  successCount    Int      @default(0) @map("success_count")
+  failureCount    Int      @default(0) @map("failure_count")
+
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at")
+
+  // Relacionamentos
+  userId      Int?     @map("user_id")
+  user        User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  webhookLogs WebhookLog[]
+
+  @@map("webhooks")
+}
+
+model WebhookLog {
+  id          Int      @id @default(autoincrement())
+  event       String
+  payload     String   @db.Text
+
+  // Resposta
+  statusCode  Int?     @map("status_code")
+  response    String?  @db.Text
+
+  // Status
+  status      String   @default("pending") // pending, success, failed
+  errorMessage String? @map("error_message")
+  attempts    Int      @default(1)
+
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  // Relacionamentos
+  webhookId   Int      @map("webhook_id")
+  webhook     Webhook  @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+
+  @@index([createdAt])
+  @@map("webhook_logs")
+}
+
+// ============================================
+// LOGS DE NOTIFICAÇÕES
+// ============================================
+
+model NotificationLog {
+  id          Int      @id @default(autoincrement())
+
+  // Tipo
+  type        String   // welcome, checkin_reminder, checkout_reminder, cleaning, review_request
+  channel     String   // whatsapp, email, sms
+
+  // Destino
+  recipient   String
+
+  // Conteúdo
+  subject     String?
+  message     String   @db.Text
+
+  // Status
+  status      String   @default("pending") // pending, sent, delivered, failed
+  errorMessage String? @map("error_message")
+
+  sentAt      DateTime? @map("sent_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  // Relacionamentos
+  userId      Int?     @map("user_id")
+  user        User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  reservationId Int?   @map("reservation_id")
+  reservation   Reservation? @relation(fields: [reservationId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([type])
+  @@map("notification_logs")
+}
+
+// ============================================
+// INTEGRAÇÕES EXTERNAS
+// ============================================
+
+model Integration {
+  id          Int      @id @default(autoincrement())
+  name        String   // airbnb, booking, google_calendar, twilio, sendgrid, etc.
+  type        String   // calendar, messaging, payment, other
+
+  // Credenciais (criptografadas)
+  config      String   @db.Text // JSON com credenciais
+
+  // Status
+  isActive    Boolean  @default(true) @map("is_active")
+  lastSyncAt  DateTime? @map("last_sync_at")
+
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@map("integrations")
+}
+
+// ============================================
+// AUDIT LOG
+// ============================================
+
+model AuditLog {
+  id          Int      @id @default(autoincrement())
+
+  // Ação
+  action      String   // create, update, delete, login, logout, etc.
+  entity      String   // user, property, reservation, etc.
+  entityId    Int?     @map("entity_id")
+
+  // Dados
+  oldData     String?  @map("old_data") @db.Text
+  newData     String?  @map("new_data") @db.Text
+
+  // Metadados
+  ipAddress   String?  @map("ip_address")
+  userAgent   String?  @map("user_agent")
+
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  // Quem fez a ação
+  userId      Int?     @map("user_id")
+
+  @@index([createdAt])
+  @@index([entity, entityId])
+  @@map("audit_logs")
+}
