@@ -1,6 +1,8 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
 
 // Importa rotas
 import authRoutes from './routes/auth.js';
@@ -20,19 +22,96 @@ import notificationService from './services/notification.service.js';
 import queueService from './services/queue.service.js';
 import schedulerService from './services/scheduler.service.js';
 
+// Importa utilitários
+import { errorHandler } from './utils/errors.js';
+
 const app = express();
 const PORT = process.env.PORT || 3001;
+const isProduction = process.env.NODE_ENV === 'production';
+
+// ============================================
+// SECURITY: Rate Limiting
+// ============================================
+
+// Rate limiter geral - 100 req/min em produção, 1000 em dev
+const generalLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minuto
+  max: isProduction ? 100 : 1000,
+  message: { error: 'Muitas requisições. Tente novamente em 1 minuto.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Rate limiter para autenticação - 5 req/min (proteção contra brute force)
+const authLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 5,
+  message: { error: 'Muitas tentativas de login. Aguarde 1 minuto.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Rate limiter para WhatsApp - 10 req/min (proteção contra spam)
+const whatsappLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  message: { error: 'Limite de mensagens atingido. Aguarde 1 minuto.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// ============================================
+// SECURITY: CORS Configuration
+// ============================================
 
 const allowedOrigins = process.env.FRONTEND_URL
   ? process.env.FRONTEND_URL.split(',').map((origin) => origin.trim()).filter(Boolean)
   : [];
 
-// Middlewares
-app.use(cors({
-  origin: allowedOrigins.length ? allowedOrigins : true,
+const corsOptions = {
+  origin: (origin, callback) => {
+    // Permite requisições sem origin (mobile apps, Postman, etc) em dev
+    if (!origin && !isProduction) {
+      return callback(null, true);
+    }
+
+    // Permite origens na whitelist
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+
+    // Em dev, permite qualquer origem se não houver whitelist
+    if (!isProduction && allowedOrigins.length === 0) {
+      return callback(null, true);
+    }
+
+    // Bloqueia origem não autorizada
+    console.warn(`⚠️ CORS bloqueado para origem: ${origin}`);
+    callback(new Error('Não permitido por CORS'));
+  },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true,
+  maxAge: 86400, // Cache preflight por 24h
+};
+
+// ============================================
+// MIDDLEWARES
+// ============================================
+
+// Security headers
+app.use(helmet({
+  contentSecurityPolicy: isProduction ? undefined : false,
+  crossOriginEmbedderPolicy: false,
 }));
+
+// CORS
+app.use(cors(corsOptions));
+
+// Rate limiting geral
+app.use(generalLimiter);
+
+// Body parsing
 app.use(express.json({ limit: '10mb' }));
 
 // Log de requisições
@@ -49,7 +128,9 @@ app.use((req, res, next) => {
 // ROTAS DA API
 // ============================================
 
-// Autenticação
+// Autenticação (com rate limiting específico para login/register)
+app.use('/api/auth/login', authLimiter);
+app.use('/api/auth/register', authLimiter);
 app.use('/api/auth', authRoutes);
 
 // Gestão de Propriedades
@@ -73,7 +154,8 @@ app.use('/api/automation', automationRoutes);
 // Configurações
 app.use('/api/settings', settingsRoutes);
 
-// WhatsApp
+// WhatsApp (com rate limiting para envio de mensagens)
+app.use('/api/whatsapp/send', whatsappLimiter);
 app.use('/api/whatsapp', whatsappRoutes);
 
 // Dashboard e Logs
@@ -193,13 +275,8 @@ app.get('/', (req, res) => {
 // ERROR HANDLER
 // ============================================
 
-app.use((err, req, res, next) => {
-  console.error('Erro não tratado:', err.stack);
-  res.status(500).json({
-    error: 'Erro interno do servidor',
-    message: process.env.NODE_ENV === 'development' ? err.message : undefined
-  });
-});
+// Usa o handler de erros padronizado
+app.use(errorHandler);
 
 // 404 Handler
 app.use((req, res) => {

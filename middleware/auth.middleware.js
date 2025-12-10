@@ -2,6 +2,10 @@ import jwt from 'jsonwebtoken';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'mevo-secret-key-change-in-production';
 
+/**
+ * Middleware de autenticação obrigatória
+ * Retorna 401 se não houver token válido
+ */
 export function authMiddleware(req, res, next) {
   const authHeader = req.headers.authorization;
 
@@ -18,10 +22,47 @@ export function authMiddleware(req, res, next) {
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
     req.userId = decoded.id;
+    req.user = decoded;
     next();
   } catch (err) {
     return res.status(401).json({ error: 'Token inválido' });
   }
+}
+
+/**
+ * Middleware de autenticação opcional
+ * Popula req.user se houver token válido, mas não bloqueia se não houver
+ * Útil para rotas que funcionam tanto para usuários logados quanto anônimos
+ */
+export function optionalAuth(req, res, next) {
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return next();
+  }
+
+  const token = authHeader.split(' ')[1];
+
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    req.userId = decoded.id;
+    req.user = decoded;
+  } catch (err) {
+    // Token inválido, mas continua sem autenticação
+  }
+
+  next();
+}
+
+/**
+ * Middleware para verificar se usuário é admin
+ * Deve ser usado após authMiddleware
+ */
+export function requireAdmin(req, res, next) {
+  if (!req.user || req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Acesso negado. Requer privilégios de administrador.' });
+  }
+  next();
 }
 
 export { JWT_SECRET };
