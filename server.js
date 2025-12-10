@@ -70,8 +70,8 @@ const allowedOrigins = process.env.FRONTEND_URL
 
 const corsOptions = {
   origin: (origin, callback) => {
-    // Permite requisições sem origin (mobile apps, Postman, etc) em dev
-    if (!origin && !isProduction) {
+    // Permite requisições sem origin (server-to-server, curl, health checks)
+    if (!origin) {
       return callback(null, true);
     }
 
