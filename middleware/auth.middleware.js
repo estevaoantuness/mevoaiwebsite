@@ -1,6 +1,15 @@
 import jwt from 'jsonwebtoken';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'mevo-secret-key-change-in-production';
+// Em produção, JWT_SECRET deve ser definido - falha rápido se não estiver
+const isProduction = process.env.NODE_ENV === 'production';
+const JWT_SECRET = process.env.JWT_SECRET;
+
+if (isProduction && !JWT_SECRET) {
+  throw new Error('JWT_SECRET must be defined in production environment');
+}
+
+// Fallback apenas para desenvolvimento/testes
+const SECRET = JWT_SECRET || 'dev-only-secret-key';
 
 /**
  * Middleware de autenticação obrigatória
@@ -20,7 +29,7 @@ export function authMiddleware(req, res, next) {
   }
 
   try {
-    const decoded = jwt.verify(token, JWT_SECRET);
+    const decoded = jwt.verify(token, SECRET);
     req.userId = decoded.id;
     req.user = decoded;
     next();
@@ -44,7 +53,7 @@ export function optionalAuth(req, res, next) {
   const token = authHeader.split(' ')[1];
 
   try {
-    const decoded = jwt.verify(token, JWT_SECRET);
+    const decoded = jwt.verify(token, SECRET);
     req.userId = decoded.id;
     req.user = decoded;
   } catch (err) {
@@ -65,4 +74,4 @@ export function requireAdmin(req, res, next) {
   next();
 }
 
-export { JWT_SECRET };
+export { SECRET as JWT_SECRET };

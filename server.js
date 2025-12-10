@@ -29,6 +29,11 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 const isProduction = process.env.NODE_ENV === 'production';
 
+// Trust proxy para funcionar corretamente atrás de load balancers (Railway, Heroku, etc)
+if (isProduction) {
+  app.set('trust proxy', 1);
+}
+
 // ============================================
 // SECURITY: Rate Limiting
 // ============================================
